@@ -48,7 +48,7 @@ export class BuildSystem {
   constructor(canvas) {
     this.canvas = canvas;
     this.gridSize = GRID_SIZE;
-    this.parts = [];
+    this.activeRocket = [];
     this.partIdCounter = 1;
     this.selectedPartType = 'fuelTank';
     this.ghostCell = { x: 0, y: 0 };
@@ -60,8 +60,12 @@ export class BuildSystem {
     this.placeInitialPod();
   }
 
+  get parts() {
+    return this.activeRocket;
+  }
+
   placeInitialPod() {
-    this.parts = [];
+    this.activeRocket = [];
     this.partIdCounter = 1;
     this.placePartAtCell('commandPod', this.defaultRootCell.x, this.defaultRootCell.y);
   }
@@ -93,7 +97,7 @@ export class BuildSystem {
   }
 
   getPartAtCell(cellX, cellY) {
-    return this.parts.find((part) => part.cellX === cellX && part.cellY === cellY) || null;
+    return this.activeRocket.find((part) => part.gridX === cellX && part.gridY === cellY) || null;
   }
 
   getNeighbors(cellX, cellY) {
@@ -106,46 +110,52 @@ export class BuildSystem {
   }
 
   isAdjacentToExisting(cellX, cellY) {
-    if (this.parts.length === 0) {
+    if (this.activeRocket.length === 0) {
       return true;
     }
     const n = this.getNeighbors(cellX, cellY);
     return Boolean(n.top || n.bottom || n.left || n.right);
   }
 
-  placePartAtCell(partType, cellX, cellY) {
+  checkOverlap(newPart) {
+    return this.activeRocket.some((part) => part.gridX === newPart.gridX && part.gridY === newPart.gridY);
+  }
+
+  placePartAtCell(partType, gridX, gridY) {
     const def = PART_DEFS[partType];
     if (!def) {
       return false;
     }
-    if (this.getPartAtCell(cellX, cellY)) {
-      return false;
-    }
-    if (partType !== 'commandPod' && !this.isAdjacentToExisting(cellX, cellY)) {
-      return false;
-    }
 
-    const world = this.toWorld(cellX, cellY);
+    const world = this.toWorld(gridX, gridY);
     const part = {
       id: this.partIdCounter++,
       type: def.type,
-      cellX,
-      cellY,
+      gridX,
+      gridY,
       x: world.x,
       y: world.y,
       width: def.width,
       height: def.height,
       dryMass: def.dryMass,
+      mass: def.dryMass,
       fuelCapacity: def.fuelCapacity,
       fuel: def.fuelCapacity,
       thrust: def.thrust,
       attachmentPoints: createAttachmentPoints(),
     };
 
-    this.parts.push(part);
+    if (this.checkOverlap(part)) {
+      return false;
+    }
+    if (partType !== 'commandPod' && !this.isAdjacentToExisting(gridX, gridY)) {
+      return false;
+    }
+
+    this.activeRocket.push(part);
 
     if (!this.validateConnectivity()) {
-      this.parts.pop();
+      this.activeRocket.pop();
       return false;
     }
 
@@ -158,14 +168,14 @@ export class BuildSystem {
       return false;
     }
 
-    const idx = this.parts.findIndex((p) => p.id === part.id);
+    const idx = this.activeRocket.findIndex((p) => p.id === part.id);
     if (idx === -1) {
       return false;
     }
 
-    const removed = this.parts.splice(idx, 1);
+    const removed = this.activeRocket.splice(idx, 1);
     if (!this.validateConnectivity()) {
-      this.parts.push(removed[0]);
+      this.activeRocket.push(removed[0]);
       return false;
     }
 
@@ -173,7 +183,7 @@ export class BuildSystem {
   }
 
   validateConnectivity() {
-    const root = this.parts.find((p) => p.type === 'commandPod');
+    const root = this.activeRocket.find((p) => p.type === 'commandPod');
     if (!root) {
       return false;
     }
@@ -184,7 +194,7 @@ export class BuildSystem {
 
     while (queue.length > 0) {
       const current = queue.shift();
-      const neighbors = this.getNeighbors(current.cellX, current.cellY);
+      const neighbors = this.getNeighbors(current.gridX, current.gridY);
       Object.values(neighbors).forEach((n) => {
         if (n && !visited.has(n.id)) {
           visited.add(n.id);
@@ -193,7 +203,7 @@ export class BuildSystem {
       });
     }
 
-    return visited.size === this.parts.length;
+    return visited.size === this.activeRocket.length;
   }
 
   addPartAtMouse(mouseX, mouseY) {
@@ -207,7 +217,7 @@ export class BuildSystem {
   }
 
   getCraftBlueprint() {
-    return this.parts.map((part) => ({ ...part }));
+    return this.activeRocket.map((part) => ({ ...part }));
   }
 
   resetToBuildFromFlight() {

@@ -3,8 +3,17 @@ const PIXELS_PER_METER = 20;
 const FUEL_BURN_RATE = 0.18;
 
 export class PhysicsEngine {
-  constructor(surfaceHeight) {
-    this.surfaceHeight = surfaceHeight;
+  constructor(canvasHeight, groundOffset) {
+    this.canvasHeight = canvasHeight;
+    this.groundOffset = groundOffset;
+  }
+
+  setCanvasHeight(height) {
+    this.canvasHeight = height;
+  }
+
+  getGroundY() {
+    return this.canvasHeight - this.groundOffset;
   }
 
   initializeCraft(parts) {
@@ -44,12 +53,12 @@ export class PhysicsEngine {
     let totalMass = 0;
 
     parts.forEach((part) => {
-      const mass = part.dryMass + (part.fuel || 0);
+      const partMass = part.dryMass + (part.fuel || 0);
       const px = part.x + part.width / 2;
       const py = part.y + part.height / 2;
-      weightedX += px * mass;
-      weightedY += py * mass;
-      totalMass += mass;
+      weightedX += partMass * px;
+      weightedY += partMass * py;
+      totalMass += partMass;
     });
 
     if (!Number.isFinite(totalMass) || totalMass <= 0) {
@@ -68,24 +77,22 @@ export class PhysicsEngine {
       return 0;
     }
 
-    const totalRequested = engines.length * FUEL_BURN_RATE * throttle * dt * 60;
-    let fuelPool = this.calculateTotalFuel(parts);
-    const used = Math.min(fuelPool, totalRequested);
-    fuelPool -= used;
+    const requestedFuel = engines.length * FUEL_BURN_RATE * throttle * dt * 60;
+    const availableFuel = this.calculateTotalFuel(parts);
+    const consumedFuel = Math.min(availableFuel, requestedFuel);
 
+    let remaining = consumedFuel;
     const tanks = parts.filter((p) => p.fuelCapacity > 0);
-    let remainingToRemove = used;
-
     for (const tank of tanks) {
-      if (remainingToRemove <= 0) {
+      if (remaining <= 0) {
         break;
       }
-      const removable = Math.min(tank.fuel, remainingToRemove);
-      tank.fuel -= removable;
-      remainingToRemove -= removable;
+      const delta = Math.min(tank.fuel, remaining);
+      tank.fuel -= delta;
+      remaining -= delta;
     }
 
-    return used;
+    return consumedFuel;
   }
 
   getBounds(parts, craftPosition, centerOfMass) {
@@ -120,12 +127,11 @@ export class PhysicsEngine {
     const mass = this.calculateTotalMass(craft.parts);
     const maxThrust = this.calculateTotalThrust(craft.parts);
 
-    const usedFuel = this.consumeFuel(craft.parts, dt, craft.throttle);
-    const hasFuel = usedFuel > 0;
-    const thrustForce = hasFuel ? maxThrust * craft.throttle : 0;
+    const consumedFuel = this.consumeFuel(craft.parts, dt, craft.throttle);
+    const activeThrust = consumedFuel > 0 ? maxThrust * craft.throttle : 0;
 
     const ax = 0;
-    const ay = mass > 0 ? (GRAVITY * PIXELS_PER_METER - thrustForce / mass) : 0;
+    const ay = mass > 0 ? GRAVITY * PIXELS_PER_METER - activeThrust / mass : 0;
 
     craft.acceleration.x = Number.isFinite(ax) ? ax : 0;
     craft.acceleration.y = Number.isFinite(ay) ? ay : 0;
@@ -147,14 +153,20 @@ export class PhysicsEngine {
       craft.position.x = 0;
     }
     if (!Number.isFinite(craft.position.y)) {
-      craft.position.y = this.surfaceHeight;
+      craft.position.y = 0;
     }
 
-    const com = this.calculateCenterOfMass(craft.parts);
-    const bounds = this.getBounds(craft.parts, craft.position, com);
+    const centerOfMass = this.calculateCenterOfMass(craft.parts);
+    const bounds = this.getBounds(craft.parts, craft.position, centerOfMass);
 
-    if (bounds.maxY >= this.surfaceHeight) {
-      const penetration = bounds.maxY - this.surfaceHeight;
+    const ground = this.getGroundY();
+    if (craft.position.y > ground) {
+      craft.position.y = ground;
+      craft.velocity.y = 0;
+    }
+
+    if (bounds.maxY >= ground) {
+      const penetration = bounds.maxY - ground;
       craft.position.y -= penetration;
       craft.velocity.y = 0;
       craft.grounded = true;
@@ -167,8 +179,9 @@ export class PhysicsEngine {
       fuel: this.calculateTotalFuel(craft.parts),
       fuelCapacity: this.calculateFuelCapacity(craft.parts),
       thrust: maxThrust,
-      centerOfMass: com,
+      centerOfMass,
       bounds,
+      ground,
     };
   }
 }
