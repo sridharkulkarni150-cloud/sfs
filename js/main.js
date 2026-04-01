@@ -1,5 +1,5 @@
 import { GameMode, GameState } from './stateManager.js';
-import { BuildSystem, PART_DEFS } from './buildSystem.js';
+import { BuildSystem, PART_DEFS, GRID_SIZE } from './buildSystem.js';
 import { PhysicsEngine, PIXELS_PER_METER } from './physicsEngine.js';
 import { Renderer } from './renderer.js';
 
@@ -22,24 +22,24 @@ const buildSystem = new BuildSystem(canvas);
 const physicsEngine = new PhysicsEngine(window.innerHeight, GROUND_OFFSET);
 const renderer = new Renderer(canvas, ctx, window.innerHeight - GROUND_OFFSET);
 
+let heldPart = null;
+let mouseX = 0;
+let mouseY = 0;
 let craft = null;
 let physicsSnapshot = {
   mass: 0,
   fuel: 0,
   fuelCapacity: 0,
-  thrust: 0,
   centerOfMass: { x: 0, y: 0 },
-  bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+  bounds: { maxY: 0 },
   ground: window.innerHeight - GROUND_OFFSET,
 };
 
 function getMousePos(targetCanvas, evt) {
   const rect = targetCanvas.getBoundingClientRect();
-  const scaleX = targetCanvas.width / rect.width;
-  const scaleY = targetCanvas.height / rect.height;
   return {
-    x: (evt.clientX - rect.left) * scaleX,
-    y: (evt.clientY - rect.top) * scaleY,
+    x: (evt.clientX - rect.left) * (targetCanvas.width / rect.width),
+    y: (evt.clientY - rect.top) * (targetCanvas.height / rect.height),
   };
 }
 
@@ -50,11 +50,15 @@ function setCanvasSize() {
   renderer.surfaceHeight = window.innerHeight - GROUND_OFFSET;
 }
 
-function setActivePartButton(selectedType) {
-  partButtons.forEach((button) => {
-    const active = button.dataset.part === selectedType;
-    button.classList.toggle('selected', active);
-  });
+function setActivePartButton(partType) {
+  partButtons.forEach((button) => button.classList.toggle('selected', button.dataset.part === partType));
+}
+
+function snappedMousePoint() {
+  return {
+    x: Math.floor(mouseX / GRID_SIZE) * GRID_SIZE,
+    y: Math.floor(mouseY / GRID_SIZE) * GRID_SIZE,
+  };
 }
 
 function enterBuildMode() {
@@ -63,15 +67,6 @@ function enterBuildMode() {
   launchBtn.disabled = false;
   backToBuildBtn.disabled = true;
   craft = null;
-  physicsSnapshot = {
-    mass: 0,
-    fuel: 0,
-    fuelCapacity: 0,
-    thrust: 0,
-    centerOfMass: { x: 0, y: 0 },
-    bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
-    ground: window.innerHeight - GROUND_OFFSET,
-  };
 }
 
 function enterFlightMode() {
@@ -83,26 +78,26 @@ function enterFlightMode() {
   modeLabelEl.textContent = GameMode.FLIGHT;
   launchBtn.disabled = true;
   backToBuildBtn.disabled = false;
+  heldPart = null;
+  setActivePartButton(null);
   craft = physicsEngine.initializeCraft(blueprint);
   physicsSnapshot = physicsEngine.update(craft, 0);
 }
 
 partButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    const partType = button.dataset.part;
-    buildSystem.setSelectedPartType(partType);
-    setActivePartButton(partType);
+    heldPart = button.dataset.part;
+    setActivePartButton(heldPart);
   });
 });
-
-setActivePartButton(buildSystem.selectedPartType);
 
 canvas.addEventListener('mousemove', (event) => {
   if (!gameState.isBuildMode()) {
     return;
   }
   const mouse = getMousePos(canvas, event);
-  buildSystem.updateGhostFromMouse(mouse.x, mouse.y);
+  mouseX = mouse.x;
+  mouseY = mouse.y;
 });
 
 canvas.addEventListener('mousedown', (event) => {
@@ -110,11 +105,14 @@ canvas.addEventListener('mousedown', (event) => {
     return;
   }
   const mouse = getMousePos(canvas, event);
-  if (event.button === 0) {
-    buildSystem.addPartAtMouse(mouse.x, mouse.y);
+  mouseX = mouse.x;
+  mouseY = mouse.y;
+
+  if (event.button === 0 && heldPart) {
+    buildSystem.placeHeldPart(heldPart, mouseX, mouseY);
   }
   if (event.button === 2) {
-    buildSystem.removePartAtMouse(mouse.x, mouse.y);
+    buildSystem.removeAt(mouseX, mouseY);
   }
 });
 
@@ -134,7 +132,7 @@ window.addEventListener('keydown', (event) => {
 
 launchBtn.addEventListener('click', enterFlightMode);
 backToBuildBtn.addEventListener('click', () => {
-  buildSystem.resetToBuildFromFlight();
+  buildSystem.placeInitialPod();
   enterBuildMode();
 });
 
@@ -146,7 +144,7 @@ let lastTime = performance.now();
 
 function updateTelemetry() {
   if (gameState.isBuildMode()) {
-    const parts = buildSystem.getCraftBlueprint();
+    const parts = buildSystem.rocketParts;
     const mass = parts.reduce((acc, p) => acc + p.dryMass + p.fuel, 0);
     const fuel = parts.reduce((acc, p) => acc + p.fuel, 0);
     const cap = parts.reduce((acc, p) => acc + p.fuelCapacity, 0);
@@ -159,27 +157,23 @@ function updateTelemetry() {
   }
 
   if (craft) {
-    const altitudeMeters = Math.max(0, (physicsSnapshot.ground - physicsSnapshot.bounds.maxY) / PIXELS_PER_METER);
-    const velMeters = craft.velocity.y / PIXELS_PER_METER;
-    const fuelPct = physicsSnapshot.fuelCapacity > 0 ? (physicsSnapshot.fuel / physicsSnapshot.fuelCapacity) * 100 : 0;
-    altitudeEl.textContent = altitudeMeters.toFixed(1);
-    velocityEl.textContent = velMeters.toFixed(1);
-    fuelEl.textContent = fuelPct.toFixed(1);
+    altitudeEl.textContent = Math.max(0, (physicsSnapshot.ground - physicsSnapshot.bounds.maxY) / PIXELS_PER_METER).toFixed(1);
+    velocityEl.textContent = (craft.velocity.y / PIXELS_PER_METER).toFixed(1);
+    fuelEl.textContent = (physicsSnapshot.fuelCapacity > 0 ? (physicsSnapshot.fuel / physicsSnapshot.fuelCapacity) * 100 : 0).toFixed(1);
     massEl.textContent = physicsSnapshot.mass.toFixed(1);
     throttleEl.textContent = Math.round(craft.throttle * 100).toString();
   }
 }
 
 function loop(now) {
-  const rawDt = (now - lastTime) / 1000;
-  const dt = Math.min(0.033, Math.max(0.001, rawDt));
+  const dt = Math.min(0.033, Math.max(0.001, (now - lastTime) / 1000));
   lastTime = now;
 
   if (gameState.isFlightMode() && craft) {
     physicsSnapshot = physicsEngine.update(craft, dt);
     renderer.drawFlight(craft, physicsSnapshot.centerOfMass);
   } else {
-    renderer.drawBuild(buildSystem.activeRocket, buildSystem.ghostCell, PART_DEFS[buildSystem.selectedPartType]);
+    renderer.drawBuild(buildSystem.rocketParts, heldPart ? PART_DEFS[heldPart] : null, heldPart ? snappedMousePoint() : null);
   }
 
   updateTelemetry();
