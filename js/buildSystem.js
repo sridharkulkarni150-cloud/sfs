@@ -11,10 +11,10 @@ function createAttachmentPoints() {
   return { top: true, bottom: true, left: true, right: true };
 }
 
-function drawPartPrimitive(ctx, part, x, y, alpha = 1) {
+function drawPartPrimitive(ctx, part, x, y, alpha = 1, forceRed = false) {
   ctx.save();
   ctx.globalAlpha = alpha;
-  if (part.invalidFloating) {
+  if (forceRed || part.invalidFloating) {
     ctx.fillStyle = 'rgba(255, 64, 64, 0.85)';
     ctx.fillRect(x, y, part.width, part.height);
     ctx.restore();
@@ -125,6 +125,31 @@ export class BuildSystem {
     return false;
   }
 
+
+
+  canAttach(newPart) {
+    if (this.rocketParts.length === 0) {
+      return { valid: true, overlap: false };
+    }
+
+    if (this.checkOverlap(newPart)) {
+      return { valid: false, overlap: true };
+    }
+
+    const adjacent = this.rocketParts.some((existing) => this.isAdjacent(newPart, existing));
+    return { valid: adjacent, overlap: false };
+  }
+
+  getGhostPlacement(partType, mouseX, mouseY) {
+    const def = PART_DEFS[partType];
+    if (!def) {
+      return { ghostPart: null, canPlace: false, overlap: false };
+    }
+    const snapped = this.snapPoint(mouseX, mouseY);
+    const ghostPart = createPart(def, snapped.x, snapped.y, -1);
+    const result = this.canAttach(ghostPart);
+    return { ghostPart, canPlace: result.valid, overlap: result.overlap };
+  }
   updateLocalOffsets() {
     const pod = this.commandPod;
     if (!pod) {
@@ -144,12 +169,8 @@ export class BuildSystem {
     const snapped = this.snapPoint(mouseX, mouseY);
     const newPart = createPart(def, snapped.x, snapped.y, this.partIdCounter++);
 
-    if (this.checkOverlap(newPart)) {
-      return false;
-    }
-
-    const hasAdjacent = this.rocketParts.some((existing) => this.isAdjacent(newPart, existing));
-    if (partType !== 'commandPod' && !hasAdjacent) {
+    const attachState = this.canAttach(newPart);
+    if (!attachState.valid) {
       return false;
     }
 

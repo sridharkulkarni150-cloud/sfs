@@ -70,7 +70,7 @@ export class Renderer {
     }
   }
 
-  drawBuild(rocketParts, heldPartDef, snappedMouse) {
+  drawBuild(rocketParts, ghostState) {
     this.updateCamera({ x: this.canvas.width / 2, y: this.canvas.height / 2 });
     this.drawBackground();
     this.drawBuildGrid();
@@ -78,8 +78,8 @@ export class Renderer {
 
     rocketParts.forEach((part) => part.draw(this.ctx, part.x, part.y, 1));
 
-    if (heldPartDef && snappedMouse) {
-      drawPartPrimitive(this.ctx, heldPartDef, snappedMouse.x, snappedMouse.y, 0.45);
+    if (ghostState && ghostState.ghostPart) {
+      drawPartPrimitive(this.ctx, ghostState.ghostPart, ghostState.ghostPart.x, ghostState.ghostPart.y, 0.45, ghostState.overlap);
     }
   }
 

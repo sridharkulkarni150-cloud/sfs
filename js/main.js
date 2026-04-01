@@ -1,5 +1,5 @@
 import { GameMode, GameState } from './stateManager.js';
-import { BuildSystem, PART_DEFS, GRID_SIZE } from './buildSystem.js';
+import { BuildSystem } from './buildSystem.js';
 import { PhysicsEngine, PIXELS_PER_METER } from './physicsEngine.js';
 import { Renderer } from './renderer.js';
 
@@ -34,6 +34,7 @@ let physicsSnapshot = {
   bounds: { maxY: 0 },
   ground: window.innerHeight - GROUND_OFFSET,
 };
+let ghostState = { ghostPart: null, canPlace: false, overlap: false };
 
 function getMousePos(targetCanvas, evt) {
   const rect = targetCanvas.getBoundingClientRect();
@@ -52,13 +53,6 @@ function setCanvasSize() {
 
 function setActivePartButton(partType) {
   partButtons.forEach((button) => button.classList.toggle('selected', button.dataset.part === partType));
-}
-
-function snappedMousePoint() {
-  return {
-    x: Math.floor(mouseX / GRID_SIZE) * GRID_SIZE,
-    y: Math.floor(mouseY / GRID_SIZE) * GRID_SIZE,
-  };
 }
 
 function enterBuildMode() {
@@ -80,6 +74,7 @@ function enterFlightMode() {
   launchBtn.disabled = true;
   backToBuildBtn.disabled = false;
   heldPart = null;
+  ghostState = { ghostPart: null, canPlace: false, overlap: false };
   setActivePartButton(null);
   craft = physicsEngine.initializeCraft(blueprint);
   physicsSnapshot = physicsEngine.update(craft, 0);
@@ -89,6 +84,7 @@ partButtons.forEach((button) => {
   button.addEventListener('click', () => {
     heldPart = button.dataset.part;
     setActivePartButton(heldPart);
+    ghostState = buildSystem.getGhostPlacement(heldPart, mouseX, mouseY);
   });
 });
 
@@ -99,6 +95,7 @@ canvas.addEventListener('mousemove', (event) => {
   const mouse = getMousePos(canvas, event);
   mouseX = mouse.x;
   mouseY = mouse.y;
+  ghostState = heldPart ? buildSystem.getGhostPlacement(heldPart, mouseX, mouseY) : { ghostPart: null, canPlace: false, overlap: false };
 });
 
 canvas.addEventListener('mousedown', (event) => {
@@ -109,8 +106,9 @@ canvas.addEventListener('mousedown', (event) => {
   mouseX = mouse.x;
   mouseY = mouse.y;
 
-  if (event.button === 0 && heldPart) {
+  if (event.button === 0 && heldPart && ghostState.canPlace && !ghostState.overlap) {
     buildSystem.placeHeldPart(heldPart, mouseX, mouseY);
+    ghostState = buildSystem.getGhostPlacement(heldPart, mouseX, mouseY);
   }
   if (event.button === 2) {
     buildSystem.removeAt(mouseX, mouseY);
@@ -174,7 +172,7 @@ function loop(now) {
     physicsSnapshot = physicsEngine.update(craft, dt);
     renderer.drawFlight(craft, physicsSnapshot.centerOfMass);
   } else {
-    renderer.drawBuild(buildSystem.rocketParts, heldPart ? PART_DEFS[heldPart] : null, heldPart ? snappedMousePoint() : null);
+    renderer.drawBuild(buildSystem.rocketParts, ghostState);
   }
 
   updateTelemetry();
