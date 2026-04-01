@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>2D Spaceflight Simulator</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <canvas id="gameCanvas" width="1200" height="700"></canvas>
+
+    <div id="ui-overlay">
+      <div class="panel" id="mode-panel">
+        <h3>Mode</h3>
+        <div id="mode-label">BUILD</div>
+        <button id="launch-btn">Launch</button>
+        <button id="back-to-build-btn" disabled>Back to Build</button>
+      </div>
+
+      <div class="panel" id="parts-panel">
+        <h3>Parts</h3>
+        <div class="parts-grid">
+          <button class="part-btn" data-part="commandPod">Command Pod</button>
+          <button class="part-btn" data-part="fuelTank">Fuel Tank</button>
+          <button class="part-btn" data-part="engine">Engine</button>
+          <button class="part-btn" data-part="separator">Separator</button>
+        </div>
+        <small>Left click place, right click remove.</small>
+      </div>
+
+      <div class="panel" id="telemetry-panel">
+        <h3>Telemetry</h3>
+        <div>Altitude: <span id="altitude">0.0</span> m</div>
+        <div>Velocity: <span id="velocity">0.0</span> m/s</div>
+        <div>Fuel: <span id="fuel">100.0</span>%</div>
+        <div>Mass: <span id="mass">0.0</span> kg</div>
+        <div>Throttle: <span id="throttle">0</span>%</div>
+        <small>Throttle: Shift (up), Ctrl (down)</small>
+      </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
