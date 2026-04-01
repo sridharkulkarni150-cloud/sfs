@@ -70,6 +70,7 @@ function enterBuildMode() {
 }
 
 function enterFlightMode() {
+  buildSystem.connectivityPass(true);
   const blueprint = buildSystem.getCraftBlueprint();
   if (blueprint.length === 0) {
     return;

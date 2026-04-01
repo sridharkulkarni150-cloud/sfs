@@ -14,6 +14,13 @@ function createAttachmentPoints() {
 function drawPartPrimitive(ctx, part, x, y, alpha = 1) {
   ctx.save();
   ctx.globalAlpha = alpha;
+  if (part.invalidFloating) {
+    ctx.fillStyle = 'rgba(255, 64, 64, 0.85)';
+    ctx.fillRect(x, y, part.width, part.height);
+    ctx.restore();
+    return;
+  }
+
   if (part.type === 'commandPod') {
     ctx.fillStyle = '#ffca3a';
     ctx.beginPath();
@@ -53,6 +60,8 @@ function createPart(def, x, y, id, localOffset = { x: 0, y: 0 }) {
     type: def.type,
     x,
     y,
+    gridX: Math.floor(x / GRID_SIZE),
+    gridY: Math.floor(y / GRID_SIZE),
     width: def.width,
     height: def.height,
     dryMass: def.dryMass,
@@ -60,6 +69,7 @@ function createPart(def, x, y, id, localOffset = { x: 0, y: 0 }) {
     fuelCapacity: def.fuelCapacity,
     fuel: def.fuelCapacity,
     thrust: def.thrust,
+    invalidFloating: false,
     attachmentPoints: createAttachmentPoints(),
     localOffset,
     draw(ctx, drawX = this.x, drawY = this.y, alpha = 1) {
@@ -100,17 +110,19 @@ export class BuildSystem {
     return { x: this.snap(x), y: this.snap(y) };
   }
 
+  isAdjacent(newPart, existingPart) {
+    const dx = newPart.gridX - existingPart.gridX;
+    const dy = newPart.gridY - existingPart.gridY;
+    return (Math.abs(dx) === 1 && dy === 0) || (Math.abs(dy) === 1 && dx === 0);
+  }
+
   checkOverlap(newPart) {
-    return this.rocketParts.some((p) => p.x === newPart.x && p.y === newPart.y);
-  }
-
-  getPartAt(x, y) {
-    return this.rocketParts.find((p) => p.x === x && p.y === y) || null;
-  }
-
-  isAdjacent(x, y) {
-    const s = GRID_SIZE;
-    return Boolean(this.getPartAt(x, y - s) || this.getPartAt(x, y + s) || this.getPartAt(x - s, y) || this.getPartAt(x + s, y));
+    for (const existing of this.rocketParts) {
+      if (newPart.gridX === existing.gridX && newPart.gridY === existing.gridY) {
+        return true;
+      }
+    }
+    return false;
   }
 
   updateLocalOffsets() {
@@ -120,6 +132,7 @@ export class BuildSystem {
     }
     this.rocketParts.forEach((part) => {
       part.localOffset = { x: part.x - pod.x, y: part.y - pod.y };
+      part.invalidFloating = false;
     });
   }
 
@@ -129,61 +142,67 @@ export class BuildSystem {
       return false;
     }
     const snapped = this.snapPoint(mouseX, mouseY);
-    const part = createPart(def, snapped.x, snapped.y, this.partIdCounter++);
-    if (this.checkOverlap(part)) {
+    const newPart = createPart(def, snapped.x, snapped.y, this.partIdCounter++);
+
+    if (this.checkOverlap(newPart)) {
       return false;
     }
-    if (partType !== 'commandPod' && !this.isAdjacent(snapped.x, snapped.y)) {
+
+    const hasAdjacent = this.rocketParts.some((existing) => this.isAdjacent(newPart, existing));
+    if (partType !== 'commandPod' && !hasAdjacent) {
       return false;
     }
-    this.rocketParts.push(part);
-    if (!this.validateConnectivity()) {
-      this.rocketParts.pop();
-      return false;
-    }
+
+    this.rocketParts.push(newPart);
     this.updateLocalOffsets();
     return true;
   }
 
   removeAt(mouseX, mouseY) {
     const snapped = this.snapPoint(mouseX, mouseY);
-    const part = this.getPartAt(snapped.x, snapped.y);
-    if (!part || part.type === 'commandPod') {
+    const gridX = Math.floor(snapped.x / GRID_SIZE);
+    const gridY = Math.floor(snapped.y / GRID_SIZE);
+    const idx = this.rocketParts.findIndex((p) => p.gridX === gridX && p.gridY === gridY);
+    if (idx < 0 || this.rocketParts[idx].type === 'commandPod') {
       return false;
     }
-    const idx = this.rocketParts.findIndex((p) => p.id === part.id);
-    const removed = this.rocketParts.splice(idx, 1)[0];
-    if (!this.validateConnectivity()) {
-      this.rocketParts.push(removed);
-      return false;
-    }
+    this.rocketParts.splice(idx, 1);
     this.updateLocalOffsets();
     return true;
   }
 
-  validateConnectivity() {
+  connectivityPass(deleteFloating = false) {
     const pod = this.commandPod;
     if (!pod) {
-      return false;
+      return { removed: 0, floating: [] };
     }
+
     const visited = new Set([pod.id]);
     const queue = [pod];
-    while (queue.length) {
-      const cur = queue.shift();
-      const n = [
-        this.getPartAt(cur.x, cur.y - GRID_SIZE),
-        this.getPartAt(cur.x, cur.y + GRID_SIZE),
-        this.getPartAt(cur.x - GRID_SIZE, cur.y),
-        this.getPartAt(cur.x + GRID_SIZE, cur.y),
-      ];
-      n.forEach((p) => {
-        if (p && !visited.has(p.id)) {
-          visited.add(p.id);
-          queue.push(p);
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      this.rocketParts.forEach((candidate) => {
+        if (!visited.has(candidate.id) && this.isAdjacent(current, candidate)) {
+          visited.add(candidate.id);
+          queue.push(candidate);
         }
       });
     }
-    return visited.size === this.rocketParts.length;
+
+    const floating = this.rocketParts.filter((p) => !visited.has(p.id));
+    this.rocketParts.forEach((p) => {
+      p.invalidFloating = !visited.has(p.id);
+    });
+
+    if (deleteFloating && floating.length > 0) {
+      const floatingIds = new Set(floating.map((p) => p.id));
+      this.rocketParts = this.rocketParts.filter((p) => !floatingIds.has(p.id));
+      this.updateLocalOffsets();
+      return { removed: floating.length, floating };
+    }
+
+    return { removed: 0, floating };
   }
 
   getCraftBlueprint() {
